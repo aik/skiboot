@@ -732,6 +732,91 @@ static void npu2_phb_fixup_scominit(struct dt_node *dn, int links_per_gpu)
 	xscom_write_mask(gcid, 0x50114c0, val, mask);
 }
 
+static int gpu_slot_to_num(const char *slot)
+{
+	char *p = NULL;
+	int ret;
+
+	if (!slot)
+		return -1;
+
+	if (memcmp(slot, "GPU", 3))
+		return -1;
+
+	ret = strtol(slot + 3, &p, 10);
+	if (*p || p == slot)
+		return -1;
+
+	return ret;
+}
+
+static void npu2_phb_nvlink_dt(struct phb *npuphb, int links_per_gpu)
+{
+	struct dt_node *g[3] = { 0 }; /* Current maximum is 3 GPUs per 1 NPU */
+	const int max_gpus = 6 / links_per_gpu;
+	struct npu2 *npu2_phb = phb_to_npu2_nvlink(npuphb);
+	const u32 npuph = npuphb->dt_node->phandle;
+	int i, gpuid, first = max_gpus, last = 0;
+
+	/* Find the indexes of GPUs connected to this NPU */
+	for (i = 0; i < npu2_phb->total_devices; ++i) {
+		gpuid = gpu_slot_to_num(npu2_phb->devices[i].nvlink.slot_label);
+		if (gpuid < 0)
+			continue;
+		if (gpuid > last)
+			last = gpuid;
+		if (gpuid < first)
+			first = gpuid;
+	}
+
+	/* Either no "GPUx" slots found or they are not consecutive, abort */
+	if (!last || last + 1 - first > max_gpus)
+		return;
+
+	/* Collect GPU device nodes, sorted by an index from "GPUn" */
+	for (i = 0; i < npu2_phb->total_devices; ++i) {
+		gpuid = gpu_slot_to_num(npu2_phb->devices[i].nvlink.slot_label);
+		g[gpuid - first] = npu2_phb->devices[i].nvlink.pd->dn;
+	}
+
+	/*
+	 * Store interconnect phandles in the device tree.
+	 * The mapping is from Witherspoon_Design_Workbook_v1.7_19June2018.pdf,
+	 * pages 39 (Sequoia), 40 (Redbud):
+	 *   Figure 16: NVLink wiring diagram for planar with 6 GPUs
+	 *   Figure 17: NVLink wiring diagram for planar with 4 GPUs
+	 */
+	switch (last + 1 - first) {
+	case 2: /* Redbud */
+		dt_add_property_cells(g[0], "ibm,nvlink-peers",
+				      g[1]->phandle, npuph,
+				      g[1]->phandle, npuph,
+				      g[1]->phandle, npuph);
+		dt_add_property_cells(g[1], "ibm,nvlink-peers",
+				      g[0]->phandle, npuph,
+				      g[0]->phandle, npuph,
+				      g[0]->phandle, npuph);
+		break;
+	case 3: /* Sequoia */
+		dt_add_property_cells(g[0], "ibm,nvlink-peers",
+				      g[1]->phandle, npuph,
+				      g[2]->phandle, g[2]->phandle,
+				      g[1]->phandle, npuph);
+		dt_add_property_cells(g[1], "ibm,nvlink-peers",
+				      g[0]->phandle, npuph,
+				      g[2]->phandle, g[2]->phandle,
+				      g[0]->phandle, npuph);
+		dt_add_property_cells(g[2], "ibm,nvlink-peers",
+				      g[1]->phandle, g[0]->phandle,
+				      g[1]->phandle, npuph,
+				      g[0]->phandle, npuph);
+		break;
+	default:
+		prlog(PR_NOTICE, "Failed to detect the exact platform\n");
+		break;
+	}
+}
+
 static void npu2_phb_final_fixup(struct phb *phb)
 {
 	int links_per_gpu = 0;
@@ -746,6 +831,8 @@ static void npu2_phb_final_fixup(struct phb *phb)
 	pci_walk_dev(phb, NULL, npu2_links_per_gpu, &links_per_gpu);
 	dt_for_each_compatible(dt_root, np, "ibm,power9-npu")
 		npu2_phb_fixup_scominit(np, links_per_gpu);
+
+	npu2_phb_nvlink_dt(phb, links_per_gpu);
 }
 
 static void npu2_init_ioda_cache(struct npu2 *p)
