@@ -28,7 +28,6 @@
 #include <ccan/str/str.h>
 #include <ccan/array_size/array_size.h>
 #include <affinity.h>
-#include <npu2-regs.h>
 #include <npu2.h>
 #include <lock.h>
 #include <xscom.h>
@@ -2097,6 +2096,11 @@ static int64_t opal_npu_init_context(uint64_t phb_id, int pasid __unused,
 	}
 
 	id = GETFIELD(NPU2_XTS_BDF_MAP_LPARSHORT, xts_bdf);
+	if (id >= NPU2_XTS_BDF_MAP_SIZE) {
+		NPU2ERR(p, "Out of bounds id=%d\n", id);
+		id = OPAL_INTERNAL_ERROR;
+		goto out;
+	}
 	NPU2DBG(p, "Found LPARSHORT = 0x%x for BDF = 0x%03llx\n", id, bdf);
 
 	/* Enable this mapping for both real and virtual addresses */
@@ -2129,14 +2133,20 @@ static int64_t opal_npu_init_context(uint64_t phb_id, int pasid __unused,
 		    GETFIELD(NPU2_XTS_PID_MAP_MSR, xts_bdf_pid)) {
 			NPU2ERR(p, "%s: Unexpected MSR value\n", __func__);
 			id = OPAL_PARAMETER;
+		} else if (!p->ctx_ref[id]) {
+			NPU2ERR(p, "%s: Unexpected mapping\n", __func__);
+			id = OPAL_INTERNAL_ERROR;
 		}
 
 		goto out;
 	}
 
 	/* Write the entry */
-	NPU2DBG(p, "XTS_PID_MAP[%03d] = 0x%08llx\n", id, xts_bdf_pid);
-	npu2_write(p, NPU2_XTS_PID_MAP + id*0x20, xts_bdf_pid);
+	if (!p->ctx_ref[id]) {
+		NPU2DBG(p, "XTS_PID_MAP[%03d] = 0x%08llx\n", id, xts_bdf_pid);
+		npu2_write(p, NPU2_XTS_PID_MAP + id*0x20, xts_bdf_pid);
+	}
+	++p->ctx_ref[id];
 
 	if (!GETFIELD(NPU2_XTS_BDF_MAP_VALID, xts_bdf)) {
 		xts_bdf = SETFIELD(NPU2_XTS_BDF_MAP_VALID, xts_bdf, 1);
@@ -2155,7 +2165,7 @@ static int opal_npu_destroy_context(uint64_t phb_id, uint64_t pid __unused,
 	struct phb *phb = pci_get_phb(phb_id);
 	struct npu2 *p;
 	uint64_t xts_bdf;
-	int rc = 0;
+	int rc = 0, id;
 
 	if (!phb || phb->phb_type != phb_type_npu_v2)
 		return OPAL_PARAMETER;
@@ -2172,10 +2182,24 @@ static int opal_npu_destroy_context(uint64_t phb_id, uint64_t pid __unused,
 	}
 
 	/*
-	 * The bdf/pid table only contains wildcard entries, so we don't
-	 * need to remove anything here.
+	 * The bdf/pid table contains wildcard entries and MSR bits which
+	 * we need to clear between switching a device from a host to a guest
+	 * or vice versa.
 	 */
-
+	id = GETFIELD(NPU2_XTS_BDF_MAP_LPARSHORT, xts_bdf);
+	if (id >= NPU2_XTS_BDF_MAP_SIZE) {
+		NPU2ERR(p, "Out of bounds id=%d\n", id);
+		rc = OPAL_INTERNAL_ERROR;
+	} else {
+		--p->ctx_ref[id];
+		rc = p->ctx_ref[id]; /* For debug */
+		if (p->ctx_ref[id] < 0) {
+			rc = OPAL_INTERNAL_ERROR; /* Sanity check */
+		} else if (!p->ctx_ref[id]) {
+			NPU2DBG(p, "XTS_PID_MAP[%03d] = 0 (destroy)\n", id);
+			npu2_write(p, NPU2_XTS_PID_MAP + id*0x20, 0);
+		}
+	}
 	unlock(&p->lock);
 	return rc;
 }
