@@ -329,4 +329,6 @@ int dctl_set_special_wakeup(struct cpu_thread *t);
 int dctl_clear_special_wakeup(struct cpu_thread *t);
 int dctl_core_is_gated(struct cpu_thread *t);
 
+extern int flush_caches(void);
+
 #endif /* __CPU_H */
