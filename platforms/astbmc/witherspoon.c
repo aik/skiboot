@@ -81,6 +81,138 @@ static void witherspoon_create_ocapi_i2c_bus(void)
 	}
 }
 
+#if 0
+static int gpu_slot_to_num(const char *slot)
+{
+	/* GPU0..5 are supported so far */
+	if (memcmp(slot, "GPU", 3) || slot[3] >= '6' || slot[4])
+		return -1;
+
+	return slot[3] - '0';
+}
+
+static void nvlink_interconnect_dt_gpus(u32 chipid, u32 npu, int first)
+{
+#define MAX_GPUS_PER_NPU	3
+	struct dt_node *gpudev[MAX_GPUS_PER_NPU] = { 0 };
+	u32 ph[MAX_GPUS_PER_NPU] = { 0 };
+	struct dt_node *phb, *pcidev;
+	const char *slot;
+	int gpunum, last = first;
+	u32 chipidtmp;
+
+	prlog(PR_ERR, "___s___ %s %u: chipid=%x npu=%x first=%d\n", __func__, __LINE__, chipid, npu, first);
+
+	/* Collect GPU nodes and phandles */
+	//dt_for_each_compatible_on_chip(dt_root, phb, "ibm,power9-pciex", chipid) {
+	dt_for_each_compatible(dt_root, phb, "ibm,power9-pciex") {
+		chipidtmp = dt_prop_get_u32(phb, "ibm,chip-id");
+
+		prlog(PR_ERR, "___s___ %s %u: phb=%s chipid=%x tmp=%x\n", __func__, __LINE__, phb->name, chipid, chipidtmp);
+		if (chipidtmp != chipid)
+			continue;
+		pcidev = NULL;
+		while (1) {
+			pcidev = dt_next(phb, pcidev);
+			prlog(PR_ERR, "___s___ %s %u: %s: pcidev=%lx\n", __func__, __LINE__, phb->name, (unsigned long)pcidev);
+			if (!pcidev)
+				break;
+
+			slot = dt_prop_get_def(pcidev, "ibm,loc-code", NULL);
+			if (!slot)
+				continue;
+
+			prlog(PR_ERR, "___s___ %s %u: slot=%s name=%s\n", __func__, __LINE__, slot, pcidev->name);
+			gpunum = gpu_slot_to_num(slot);
+			if (gpunum < 0 || gpunum - first > MAX_GPUS_PER_NPU)
+				continue;
+
+			gpudev[gpunum - first] = pcidev;
+			//ph[gpunum] = dt_prop_get_u32(gpudev[gpunum], "phandle");
+			ph[gpunum - first] = gpudev[gpunum - first]->phandle;
+			if (gpunum > last)
+				last = gpunum;
+
+		}
+	}
+
+	/* Write interconnect phandles */
+	prlog(PR_ERR, "___s___ %s %u: first=%d last=%d\n", __func__, __LINE__, first, last);
+	switch (last + 1 - first) {
+	case 2: /* Redbud */
+		prlog(PR_ERR, "___s___ %s %u\n", __func__, __LINE__);
+		dt_add_property_cells(gpudev[0], "ibm,nvlinks",
+				ph[1], npu, ph[1], npu, ph[1], npu);
+		dt_add_property_cells(gpudev[1], "ibm,nvlinks",
+				ph[1], npu, ph[1], npu, ph[1], npu);
+		break;
+
+	case 3: /* Sequoia */
+		prlog(PR_ERR, "___s___ %s %u: %lx %lx %lx -- %x -- %x %x %x\n", __func__, __LINE__,
+			(unsigned long) gpudev[0], (unsigned long) gpudev[1], (unsigned long) gpudev[2],
+			npu, ph[0], ph[1], ph[2]);
+		dt_add_property_cells(gpudev[0], "__ibm,nvlinks",
+				ph[1], npu, ph[2], ph[2], ph[1], npu);
+		prlog(PR_ERR, "___s___ %s %u\n", __func__, __LINE__);
+		dt_add_property_cells(gpudev[1], "__ibm,nvlinks",
+				ph[0], npu, ph[2], ph[2], ph[0], npu);
+		prlog(PR_ERR, "___s___ %s %u\n", __func__, __LINE__);
+		dt_add_property_cells(gpudev[2], "__ibm,nvlinks",
+				ph[1], ph[0], ph[1], npu, ph[0], npu);
+		prlog(PR_ERR, "___s___ %s %u\n", __func__, __LINE__);
+		break;
+	default:
+		prlog(PR_ERR, "___s___ %s %u: something went wrong\n", __func__, __LINE__);
+		break;
+	}
+}
+
+static void nvlink_interconnect_dt(void)
+{
+	struct dt_node *xscom, *npu, *link;
+	u32 chipid, npuph;
+	int first, gpunum;
+	unsigned char gpumask = 0; /* a bit is set per GPU# */
+	const char *slot;
+
+	if (1)
+		return;
+
+	dt_for_each_compatible(dt_root, xscom, "ibm,power9-xscom") {
+
+		prlog(PR_ERR, "___s___ %s %u: %s\n", __func__, __LINE__, xscom->name);
+
+		chipid = dt_prop_get_u32(xscom, "ibm,chip-id");
+
+		dt_for_each_compatible(xscom, npu, "ibm,power9-npu") {
+			gpumask = 0;
+
+			prlog(PR_ERR, "___s___ %s %u: %s\n", __func__, __LINE__, npu->name);
+
+			dt_for_each_compatible(npu, link, "ibm,npu-link") {
+				slot = dt_prop_get(link, "ibm,slot-label");
+				gpunum = gpu_slot_to_num(slot);
+				prlog(PR_ERR, "___s___ %s %u: %s %d\n", __func__, __LINE__, link->name, gpunum);
+				if (gpunum < 0)
+					continue;
+				gpumask |= (1 << gpunum);
+				prlog(PR_ERR, "___s___ %s %u: %s %x\n", __func__, __LINE__, link->name, gpumask);
+			}
+
+			/* No "GPUx" slots found */
+			if (!gpumask)
+				continue;
+
+			first = ffs(gpumask) - 1;
+
+			npuph = npu->phandle;//dt_prop_get_u32(npu, "phandle");
+			prlog(PR_ERR, "___s___ %s %u\n", __func__, __LINE__);
+			nvlink_interconnect_dt_gpus(chipid, npuph, first);
+		}
+	}
+}
+#endif
+
 static bool witherspoon_probe(void)
 {
 	struct dt_node *np;
@@ -97,7 +229,9 @@ static bool witherspoon_probe(void)
 	uart_set_console_policy(UART_CONSOLE_OPAL);
 
 	vpd_dt_fixup();
-
+#if 0
+	nvlink_interconnect_dt();
+#endif
 	witherspoon_create_ocapi_i2c_bus();
 
 	dt_for_each_compatible(dt_root, np, "ibm,npu-link") {
@@ -362,6 +496,9 @@ DECLARE_PLATFORM(witherspoon) = {
 	.probe			= witherspoon_probe,
 	.init			= astbmc_init,
 	.pre_pci_fixup		= witherspoon_shared_slot_fixup,
+#if 0
+	.pci_probe_complete	= nvlink_interconnect_dt,
+#endif
 	.start_preload_resource	= flash_start_preload_resource,
 	.resource_loaded	= flash_resource_loaded,
 	.bmc			= &bmc_plat_ast2500_openbmc,
