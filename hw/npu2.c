@@ -777,6 +777,8 @@ static void npu2_phb_nvlink_dt(struct phb *npuphb, int links_per_gpu)
 		gpuid = gpu_slot_to_num(npu2_phb->devices[i].nvlink.slot_label);
 		g[gpuid - first] = npu2_phb->devices[i].nvlink.pd->dn;
 	}
+	prlog(PR_ERR, "___s___ %s %u: links_per_gpu=%d chipid=%x npu=%x first=%d\n",
+		__func__, __LINE__, links_per_gpu, npu2_phb->chip_id, npuph, first);
 
 	/*
 	 * Store interconnect phandles in the device tree.
@@ -785,8 +787,10 @@ static void npu2_phb_nvlink_dt(struct phb *npuphb, int links_per_gpu)
 	 *   Figure 16: NVLink wiring diagram for planar with 6 GPUs
 	 *   Figure 17: NVLink wiring diagram for planar with 4 GPUs
 	 */
+	prlog(PR_ERR, "___s___ %s %u: first=%d last=%d\n", __func__, __LINE__, first, last);
 	switch (last + 1 - first) {
 	case 2: /* Redbud */
+		prlog(PR_ERR, "___s___ %s %u\n", __func__, __LINE__);
 		dt_add_property_cells(g[0], "ibm,nvlink-peers",
 				      g[1]->phandle, npuph,
 				      g[1]->phandle, npuph,
@@ -797,6 +801,9 @@ static void npu2_phb_nvlink_dt(struct phb *npuphb, int links_per_gpu)
 				      g[0]->phandle, npuph);
 		break;
 	case 3: /* Sequoia */
+		prlog(PR_ERR, "___s___ %s %u: %lx %lx %lx -- %x -- %x %x %x\n", __func__, __LINE__,
+			(unsigned long) g[0], (unsigned long) g[1], (unsigned long) g[2],
+			npuph, g[0]->phandle, g[1]->phandle, g[2]->phandle);
 		dt_add_property_cells(g[0], "ibm,nvlink-peers",
 				      g[1]->phandle, npuph,
 				      g[2]->phandle, g[2]->phandle,
@@ -2080,7 +2087,10 @@ static int64_t opal_npu_init_context(uint64_t phb_id, int pasid __unused,
 	 * expansion if required.
 	 */
 	if (msr & ~NPU2_VALID_ATS_MSR_BITS)
+	{
+		prlog(PR_ERR, "___s___ %s %u: WARN %llx  %lx\n", __func__, __LINE__, msr, ~NPU2_VALID_ATS_MSR_BITS);
 		return OPAL_UNSUPPORTED;
+	}
 
 	/*
 	 * Need to get LPARSHORT.
@@ -2145,17 +2155,17 @@ static int64_t opal_npu_init_context(uint64_t phb_id, int pasid __unused,
 	if (!p->ctx_ref[id]) {
 		NPU2DBG(p, "XTS_PID_MAP[%03d] = 0x%08llx\n", id, xts_bdf_pid);
 		npu2_write(p, NPU2_XTS_PID_MAP + id*0x20, xts_bdf_pid);
+//
+//		if (!GETFIELD(NPU2_XTS_BDF_MAP_VALID, xts_bdf)) {
+		xts_bdf = SETFIELD(NPU2_XTS_BDF_MAP_VALID, xts_bdf, 1);
+		npu2_write(p, NPU2_XTS_BDF_MAP + id*8, xts_bdf);
+//		}
 	}
 	++p->ctx_ref[id];
 
-	if (!GETFIELD(NPU2_XTS_BDF_MAP_VALID, xts_bdf)) {
-		xts_bdf = SETFIELD(NPU2_XTS_BDF_MAP_VALID, xts_bdf, 1);
-		npu2_write(p, NPU2_XTS_BDF_MAP + id*8, xts_bdf);
-	}
-
 out:
 	unlock(&p->lock);
-	return id;
+	return id | (p->ctx_ref[id] << 8);
 }
 opal_call(OPAL_NPU_INIT_CONTEXT, opal_npu_init_context, 4);
 
@@ -2192,12 +2202,15 @@ static int opal_npu_destroy_context(uint64_t phb_id, uint64_t pid __unused,
 		rc = OPAL_INTERNAL_ERROR;
 	} else {
 		--p->ctx_ref[id];
-		rc = p->ctx_ref[id]; /* For debug */
+		rc = (p->ctx_ref[id] << 8); /* For debug */
 		if (p->ctx_ref[id] < 0) {
 			rc = OPAL_INTERNAL_ERROR; /* Sanity check */
 		} else if (!p->ctx_ref[id]) {
 			NPU2DBG(p, "XTS_PID_MAP[%03d] = 0 (destroy)\n", id);
 			npu2_write(p, NPU2_XTS_PID_MAP + id*0x20, 0);
+
+//			xts_bdf = SETFIELD(NPU2_XTS_BDF_MAP_VALID, xts_bdf, 0);
+//			npu2_write(p, NPU2_XTS_BDF_MAP + id*8, xts_bdf);
 		}
 	}
 	unlock(&p->lock);
