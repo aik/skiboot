@@ -2127,7 +2127,7 @@ static int opal_npu_map_lpar(uint64_t phb_id, uint64_t bdf, uint64_t lparid,
 	struct phb *phb = pci_get_phb(phb_id);
 	struct npu2 *p;
 	struct npu2_dev *ndev = NULL;
-	uint64_t xts_bdf_lpar, rc = OPAL_SUCCESS;
+	uint64_t xts_bdf_lpar, atsd_lpar, rc = OPAL_SUCCESS;
 	int i;
 	int id;
 
@@ -2190,6 +2190,12 @@ static int opal_npu_map_lpar(uint64_t phb_id, uint64_t bdf, uint64_t lparid,
 
 	NPU2DBG(p, "XTS_BDF_MAP[%03d] = 0x%08llx\n", id, xts_bdf_lpar);
 	npu2_write(p, NPU2_XTS_BDF_MAP + id*8, xts_bdf_lpar);
+
+	/* We only expose a single ATSD register at the moment, map it to LPARID */
+	atsd_lpar = SETFIELD(NPU2_XTS_MMIO_ATSD_LPARID, 0, lparid);
+	if (!lparid)
+		atsd_lpar = SETFIELD(NPU2_XTS_MMIO_ATSD_MSR_HV, atsd_lpar, 1);
+	npu2_write(p, NPU2_XTS_MMIO_ATSD0_LPARID, atsd_lpar);
 
 out:
 	unlock(&p->lock);
