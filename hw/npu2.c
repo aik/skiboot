@@ -1334,7 +1334,7 @@ static void npu2_probe_phb(struct dt_node *dn)
 	struct proc_chip *proc_chip;
 	struct dt_node *np;
 	uint32_t gcid, scom, index, phb_index, links;
-	uint64_t reg[2], mm_win[2], val;
+	uint64_t reg[2], mm_win[2], val, mask;
 	char *path;
 
 	/* Abort if any OpenCAPI links detected */
@@ -1363,18 +1363,48 @@ static void npu2_probe_phb(struct dt_node *dn)
 	 *
 	 * Obviously if the year is now 2020 that didn't happen and you
 	 * should fix this :-) */
-	xscom_write_mask(gcid, 0x5011000, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011030, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011060, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011090, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011200, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011230, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011260, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011290, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011400, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011430, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011460, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(gcid, 0x5011490, PPC_BIT(58), PPC_BIT(58));
+	val = PPC_BIT(58);
+	mask = PPC_BIT(58) | /* CONFIG_NVLINK_MODE */
+	       PPC_BIT(40); /* CONFIG_ENABLE_SNARF_CPM */
+
+	/*
+	 * V100 GPUs are known to violate NVLink2 protocol if some GPU memory
+	 * mapped by a CPU was also "linear-block" mapped by a GPU. When this
+	 * happens, it breaks the NPU2 cache coherency state machine and
+	 * it throws machine checkstop. Disabling snarfing fixes this so let's
+	 * disable it by default.
+	 */
+	index = dt_prop_get_u32(dn, "ibm,npu-index");
+	if (nvram_query_eq("opal-npu2-snarf-cpm", "enable")) {
+		prlog(PR_WARNING, "NPU2#%d: enabling Probe.I.MO snarfing, a bad GPU driver may crash the system!\n",
+				index);
+		val |= PPC_BIT(40); /* CONFIG_ENABLE_SNARF_CPM */
+	}
+
+	xscom_write_mask(gcid, NPU_STCK0_CS_SM0_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK0_CS_SM1_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK0_CS_SM2_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK0_CS_SM3_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK1_CS_SM0_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK1_CS_SM1_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK1_CS_SM2_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK1_CS_SM3_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK2_CS_SM0_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK2_CS_SM1_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK2_CS_SM2_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(gcid, NPU_STCK2_CS_SM3_MISC_CONFIG0,
+			 val, mask);
 
 	xscom_write_mask(gcid, 0x50110c0, PPC_BIT(53), PPC_BIT(53));
 	xscom_write_mask(gcid, 0x50112c0, PPC_BIT(53), PPC_BIT(53));
@@ -1425,7 +1455,6 @@ static void npu2_probe_phb(struct dt_node *dn)
 	xscom_write_mask(gcid, 0x5011469, val, PPC_BITMASK(6,11));
 	xscom_write_mask(gcid, 0x5011499, val, PPC_BITMASK(6,11));
 
-	index = dt_prop_get_u32(dn, "ibm,npu-index");
 	phb_index = dt_prop_get_u32(dn, "ibm,phb-index");
 	links = dt_prop_get_u32(dn, "ibm,npu-links");
 	prlog(PR_INFO, "NPU2: Chip %d Found NPU2#%d (%d links) at %s\n",
