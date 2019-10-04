@@ -297,6 +297,8 @@ struct phb_ops {
 					  uint64_t pci_start_addr,
 					  uint64_t pci_mem_size);
 
+	int64_t (*set_phb_flags)(struct phb *phb, uint64_t flags);
+
 	int64_t (*set_mve)(struct phb *phb, uint32_t mve_number,
 			   uint64_t pe_number);
 

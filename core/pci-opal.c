@@ -461,6 +461,25 @@ static int64_t opal_pci_map_pe_dma_window_real(uint64_t phb_id,
 }
 opal_call(OPAL_PCI_MAP_PE_DMA_WINDOW_REAL, opal_pci_map_pe_dma_window_real, 5);
 
+static int64_t opal_pci_set_phb_flags(uint64_t phb_id, int64_t flags)
+{
+	struct phb *phb = pci_get_phb(phb_id);
+	int64_t rc;
+
+	if (!phb)
+		return OPAL_PARAMETER;
+
+	if (!phb->ops->set_phb_flags)
+		return OPAL_UNSUPPORTED;
+
+	phb_lock(phb);
+	rc = phb->ops->set_phb_flags(phb, flags);
+	phb_unlock(phb);
+
+	return rc;
+}
+opal_call(OPAL_PCI_SET_PHB_FLAGS, opal_pci_set_phb_flags, 2);
+
 static int64_t opal_pci_reset(uint64_t id, uint8_t reset_scope,
                               uint8_t assert_state)
 {

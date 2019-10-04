@@ -1544,6 +1544,27 @@ static int64_t phb4_map_pe_dma_window_real(struct phb *phb,
 	return OPAL_SUCCESS;
 }
 
+static int64_t phb4_set_phb_flags(struct phb *phb, uint64_t flags)
+{
+	uint64_t data64;
+	struct phb4 *p = phb_to_phb4(phb);
+
+	if (flags & ~OPAL_PCI_PHB_FLAG_TVE1_4GB)
+		return OPAL_PARAMETER;
+
+	data64 = in_be64(p->regs + PHB_CTRLR);
+	if (flags & OPAL_PCI_PHB_FLAG_TVE1_4GB) {
+		prlog(PR_WARNING, "PHB4: Enabling 4GB bypass mode\n");
+		data64 |= PPC_BIT(24);
+	} else {
+		prlog(PR_WARNING, "PHB4: Disabling 4GB bypass mode\n");
+		data64 &= ~PPC_BIT(24);
+	}
+	out_be64(p->regs + PHB_CTRLR, data64);
+
+	return OPAL_SUCCESS;
+}
+
 static int64_t phb4_set_ive_pe(struct phb *phb,
 			       uint64_t pe_number,
 			       uint32_t ive_num)
@@ -4807,6 +4828,7 @@ static const struct phb_ops phb4_ops = {
 	.map_pe_mmio_window	= phb4_map_pe_mmio_window,
 	.map_pe_dma_window	= phb4_map_pe_dma_window,
 	.map_pe_dma_window_real = phb4_map_pe_dma_window_real,
+	.set_phb_flags		= phb4_set_phb_flags,
 	.set_xive_pe		= phb4_set_ive_pe,
 	.get_msi_32		= phb4_get_msi_32,
 	.get_msi_64		= phb4_get_msi_64,
