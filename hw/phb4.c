@@ -82,8 +82,6 @@
  *    o core/pci.c: pci_reset_phb() -> pci_scan_phb()
  */
 
-
-#undef NO_ASB
 #undef LOG_CFG
 
 #include <skiboot.h>
@@ -147,9 +145,6 @@ static int rx_err_max = PHB4_RX_ERR_MAX;
  */
 static inline uint64_t phb4_read_reg_asb(struct phb4 *p, uint32_t offset)
 {
-#ifdef NO_ASB
-	return in_be64(p->regs + offset);
-#else
 	int64_t rc;
 	uint64_t addr, val;
 
@@ -175,15 +170,11 @@ static inline uint64_t phb4_read_reg_asb(struct phb4 *p, uint32_t offset)
 		return -1ull;
 	}
 	return val;
-#endif
 }
 
 static inline void phb4_write_reg_asb(struct phb4 *p,
 				      uint32_t offset, uint64_t val)
 {
-#ifdef NO_ASB
-	out_be64(p->regs + offset, val);
-#else
 	int64_t rc;
 	uint64_t addr;
 
@@ -208,7 +199,6 @@ static inline void phb4_write_reg_asb(struct phb4 *p,
 		PHBERR(p, "XSCOM error writing register 0x%x\n", offset);
 		return;
 	}
-#endif
 }
 
 static uint64_t phb4_read_reg(struct phb4 *p, uint32_t offset)
