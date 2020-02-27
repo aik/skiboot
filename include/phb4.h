@@ -163,7 +163,6 @@ struct phb4 {
 #define PHB4_REV_NIMBUS_DD10	0xa40001
 #define PHB4_REV_NIMBUS_DD20	0xa40002
 	void			*regs;
-	void			*int_mmio;
 	uint64_t		pe_xscom;   /* XSCOM bases */
 	uint64_t		pe_stk_xscom;
 	uint64_t		pci_xscom;

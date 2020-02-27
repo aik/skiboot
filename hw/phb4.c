@@ -5638,6 +5638,7 @@ static void phb4_create(struct dt_node *np)
 	uint32_t irq_base, irq_flags;
 	int i;
 	int chip_id;
+	void *int_mmio;
 
 	chip_id = dt_prop_get_u32(np, "ibm,chip-id");
 	p = local_alloc(chip_id, sizeof(struct phb4), 8);
@@ -5649,7 +5650,6 @@ static void phb4_create(struct dt_node *np)
 	p->chip_id = chip_id;
 	p->pec = dt_prop_get_u32(np, "ibm,phb-pec-index");
 	p->regs = (void *)dt_get_address(np, 0, NULL);
-	p->int_mmio = (void *)dt_get_address(np, 1, NULL);
 	p->phb.dt_node = np;
 	p->phb.ops = &phb4_ops;
 	p->phb.phb_type = phb_type_pcie_v4;
@@ -5793,12 +5793,13 @@ static void phb4_create(struct dt_node *np)
 		irq_flags |= XIVE_SRC_TRIGGER_PAGE;
 
 	/* Register all interrupt sources with XIVE */
+	int_mmio = (void *)dt_get_address(np, 1, NULL);
 	xive_register_hw_source(p->base_msi, p->num_irqs - 8, 16,
-				p->int_mmio, irq_flags, NULL, NULL);
+				int_mmio, irq_flags, NULL, NULL);
 
 	/* XIVE_SRC_SHIFT_BUG is a DD1 workaround */
 	xive_register_hw_source(p->base_lsi, 8, 16,
-				p->int_mmio + ((p->num_irqs - 8) << 16),
+				int_mmio + ((p->num_irqs - 8) << 16),
 				XIVE_SRC_LSI | XIVE_SRC_SHIFT_BUG,
 				p,
 				&phb4_lsi_ops);
