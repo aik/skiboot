@@ -157,7 +157,9 @@ static inline uint64_t phb4_read_reg_asb(struct phb4 *p, uint32_t offset)
 		return -1ull;
 	}
 	addr = XETU_HV_IND_ADDR_VALID | offset;
-	if ((offset >= 0x1000 && offset < 0x1800) || (offset == PHB_CONFIG_DATA))
+	if ((offset >= PHB_RC_CONFIG_BASE &&
+	     offset < PHB_RC_CONFIG_BASE + PHB_RC_CONFIG_SIZE) ||
+	    (offset == PHB_CONFIG_DATA))
 		addr |= XETU_HV_IND_ADDR_4B;
  	rc = xscom_write(p->chip_id, p->etu_xscom + XETU_HV_IND_ADDRESS, addr);
 	if (rc != 0) {
@@ -187,7 +189,9 @@ static inline void phb4_write_reg_asb(struct phb4 *p,
 		return;
 	}
 	addr = XETU_HV_IND_ADDR_VALID | offset;
-	if ((offset >= 0x1000 && offset < 0x1800) || (offset == PHB_CONFIG_DATA))
+	if ((offset >= PHB_RC_CONFIG_BASE &&
+	     offset < PHB_RC_CONFIG_BASE + PHB_RC_CONFIG_SIZE) ||
+	    (offset == PHB_CONFIG_DATA))
 		addr |= XETU_HV_IND_ADDR_4B;
  	rc = xscom_write(p->chip_id, p->etu_xscom + XETU_HV_IND_ADDRESS, addr);
 	if (rc != 0) {
