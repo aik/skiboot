@@ -456,7 +456,7 @@ static int64_t phb4_pcicfg_read(struct phb4 *p, uint32_t bdfn,
 	addr = SETFIELD(PHB_CA_BDFN, addr, bdfn);
 	addr = SETFIELD(PHB_CA_REG, addr, offset & ~3u);
 	addr = SETFIELD(PHB_CA_PE, addr, pe);
-	out_be64(p->regs + PHB_CONFIG_ADDRESS, addr);
+	phb4_write_reg(p, PHB_CONFIG_ADDRESS, addr);
 	switch(size) {
 	case 1:
 		*((uint8_t *)data) =
@@ -528,7 +528,7 @@ static int64_t phb4_pcicfg_write(struct phb4 *p, uint32_t bdfn,
 	addr = SETFIELD(PHB_CA_BDFN, addr, bdfn);
 	addr = SETFIELD(PHB_CA_REG, addr, offset & ~3u);
 	addr = SETFIELD(PHB_CA_PE, addr, pe);
-	out_be64(p->regs + PHB_CONFIG_ADDRESS, addr);
+	phb4_write_reg(p, PHB_CONFIG_ADDRESS, addr);
 	switch(size) {
 	case 1:
 		out_8(p->regs + PHB_CONFIG_DATA + (offset & 3), data);
@@ -599,9 +599,9 @@ static void phb4_root_port_init(struct phb *phb, struct pci_device *dev,
 	if (slot && slot->pluggable && slot->power_limit) {
 		uint64_t val;
 
-		val = in_be64(p->regs + PHB_PCIE_SCR);
+		val = phb4_read_reg(p, PHB_PCIE_SCR);
 		val |= PHB_PCIE_SCR_SLOT_CAP;
-		out_be64(p->regs + PHB_PCIE_SCR, val);
+		phb4_write_reg(p, PHB_PCIE_SCR, val);
 
 		/* update the cached slotcap */
 		pci_cfg_read32(phb, bdfn, ecap + PCICAP_EXP_SLOTCAP,
@@ -923,7 +923,7 @@ static int64_t phb4_wait_bit(struct phb4 *p, uint32_t reg,
 		return OPAL_SUCCESS;
 
 	for (;;) {
-		val = in_be64(p->regs + reg);
+		val = phb4_read_reg(p, reg);
 		if (val == 0xffffffffffffffffull) {
 			/* XXX Fenced ? */
 			return OPAL_HARDWARE;
@@ -981,7 +981,7 @@ static int64_t phb4_tce_kill(struct phb *phb, uint32_t kill_type,
 				return OPAL_PARAMETER;
 			}
 			/* Perform kill */
-			out_be64(p->regs + PHB_TCE_KILL, PHB_TCE_KILL_ONE | val);
+			phb4_write_reg(p, PHB_TCE_KILL, PHB_TCE_KILL_ONE | val);
 			/* Next page */
 			dma_addr += tce_size;
 		}
@@ -995,7 +995,7 @@ static int64_t phb4_tce_kill(struct phb *phb, uint32_t kill_type,
 		if (rc)
 			return rc;
 		/* Perform kill */
-		out_be64(p->regs + PHB_TCE_KILL, PHB_TCE_KILL_PE |
+		phb4_write_reg(p, PHB_TCE_KILL, PHB_TCE_KILL_PE |
 			 SETFIELD(PHB_TCE_KILL_PENUM, 0ull, pe_number));
 		break;
 	case OPAL_PCI_TCE_KILL_ALL:
@@ -1007,14 +1007,14 @@ static int64_t phb4_tce_kill(struct phb *phb, uint32_t kill_type,
 		if (rc)
 			return rc;
 		/* Perform kill */
-		out_be64(p->regs + PHB_TCE_KILL, PHB_TCE_KILL_ALL);
+		phb4_write_reg(p, PHB_TCE_KILL, PHB_TCE_KILL_ALL);
 		break;
 	default:
 		return OPAL_PARAMETER;
 	}
 
 	/* Start DMA sync process */
-	out_be64(p->regs + PHB_DMARD_SYNC, PHB_DMARD_SYNC_START);
+	phb4_write_reg(p, PHB_DMARD_SYNC, PHB_DMARD_SYNC_START);
 
 	/* Wait for kill to complete */
 	rc = phb4_wait_bit(p, PHB_Q_DMA_R, PHB_Q_DMA_R_TCE_KILL_STATUS, 0);
@@ -1052,54 +1052,54 @@ static int64_t phb4_ioda_reset(struct phb *phb, bool purge)
 
 	/* Init_30..31 - Errata workaround, clear PESTA entry 0 */
 	phb4_ioda_sel(p, IODA3_TBL_PESTA, 0, false);
-	out_be64(p->regs + PHB_IODA_DATA0, 0);
+	phb4_write_reg(p, PHB_IODA_DATA0, 0);
 
 	/* Init_32..33 - MIST  */
 	phb4_ioda_sel(p, IODA3_TBL_MIST, 0, true);
-	val = in_be64(p->regs + PHB_IODA_ADDR);
+	val = phb4_read_reg(p, PHB_IODA_ADDR);
 	val = SETFIELD(PHB_IODA_AD_MIST_PWV, val, 0xf);
-	out_be64(p->regs + PHB_IODA_ADDR, val);
+	phb4_write_reg(p, PHB_IODA_ADDR, val);
 	for (i = 0; i < (p->num_irqs/4); i++)
-		out_be64(p->regs + PHB_IODA_DATA0, p->mist_cache[i]);
+		phb4_write_reg(p, PHB_IODA_DATA0, p->mist_cache[i]);
 
 	/* Init_34..35 - MRT */
 	phb4_ioda_sel(p, IODA3_TBL_MRT, 0, true);
 	for (i = 0; i < p->mrt_size; i++)
-		out_be64(p->regs + PHB_IODA_DATA0, 0);
+		phb4_write_reg(p, PHB_IODA_DATA0, 0);
 
 	/* Init_36..37 - TVT */
 	phb4_ioda_sel(p, IODA3_TBL_TVT, 0, true);
 	for (i = 0; i < p->tvt_size; i++)
-		out_be64(p->regs + PHB_IODA_DATA0, p->tve_cache[i]);
+		phb4_write_reg(p, PHB_IODA_DATA0, p->tve_cache[i]);
 
 	/* Init_38..39 - MBT */
 	phb4_ioda_sel(p, IODA3_TBL_MBT, 0, true);
 	for (i = 0; i < p->mbt_size; i++) {
-		out_be64(p->regs + PHB_IODA_DATA0, p->mbt_cache[i][0]);
-		out_be64(p->regs + PHB_IODA_DATA0, p->mbt_cache[i][1]);
+		phb4_write_reg(p, PHB_IODA_DATA0, p->mbt_cache[i][0]);
+		phb4_write_reg(p, PHB_IODA_DATA0, p->mbt_cache[i][1]);
 	}
 
 	/* Init_40..41 - MDT */
 	phb4_ioda_sel(p, IODA3_TBL_MDT, 0, true);
 	for (i = 0; i < p->max_num_pes; i++)
-		out_be64(p->regs + PHB_IODA_DATA0, p->mdt_cache[i]);
+		phb4_write_reg(p, PHB_IODA_DATA0, p->mdt_cache[i]);
 
 	/* Additional OPAL specific inits */
 
 	/* Clear PEST & PEEV */
 	for (i = 0; i < p->max_num_pes; i++) {
 		phb4_ioda_sel(p, IODA3_TBL_PESTA, i, false);
-		out_be64(p->regs + PHB_IODA_DATA0, 0);
+		phb4_write_reg(p, PHB_IODA_DATA0, 0);
 		phb4_ioda_sel(p, IODA3_TBL_PESTB, i, false);
-		out_be64(p->regs + PHB_IODA_DATA0, 0);
+		phb4_write_reg(p, PHB_IODA_DATA0, 0);
 	}
 
 	phb4_ioda_sel(p, IODA3_TBL_PEEV, 0, true);
 	for (i = 0; i < p->max_num_pes/64; i++)
-		out_be64(p->regs + PHB_IODA_DATA0, 0);
+		phb4_write_reg(p, PHB_IODA_DATA0, 0);
 
 	/* Invalidate RTE, TCE cache */
-	out_be64(p->regs + PHB_RTC_INVALIDATE, PHB_RTC_INVALIDATE_ALL);
+	phb4_write_reg(p, PHB_RTC_INVALIDATE, PHB_RTC_INVALIDATE_ALL);
 
 	return phb4_tce_kill(&p->phb, OPAL_PCI_TCE_KILL_ALL, 0, 0, 0, 0);
 }
@@ -1115,9 +1115,9 @@ static int64_t phb4_papr_errinjct_reset(struct phb *phb)
 {
 	struct phb4 *p = phb_to_phb4(phb);
 
-	out_be64(p->regs + PHB_PAPR_ERR_INJ_CTL, 0x0ul);
-	out_be64(p->regs + PHB_PAPR_ERR_INJ_ADDR, 0x0ul);
-	out_be64(p->regs + PHB_PAPR_ERR_INJ_MASK, 0x0ul);
+	phb4_write_reg(p, PHB_PAPR_ERR_INJ_CTL, 0x0ul);
+	phb4_write_reg(p, PHB_PAPR_ERR_INJ_ADDR, 0x0ul);
+	phb4_write_reg(p, PHB_PAPR_ERR_INJ_MASK, 0x0ul);
 
 	return OPAL_SUCCESS;
 }
@@ -1284,8 +1284,8 @@ static int64_t phb4_phb_mmio_enable(struct phb __unused *phb,
 	p->mbt_cache[window_num][0] = mbt0;
 	p->mbt_cache[window_num][1] = mbt1;
 	phb4_ioda_sel(p, IODA3_TBL_MBT, window_num << 1, true);
-	out_be64(p->regs + PHB_IODA_DATA0, mbt0);
-	out_be64(p->regs + PHB_IODA_DATA0, mbt1);
+	phb4_write_reg(p, PHB_IODA_DATA0, mbt0);
+	phb4_write_reg(p, PHB_IODA_DATA0, mbt1);
 
 	return OPAL_SUCCESS;
 }
@@ -1326,7 +1326,7 @@ static int64_t phb4_map_pe_mmio_window(struct phb *phb,
 		mdt0 = p->mdt_cache[segment_num];
 		mdt0 = SETFIELD(IODA3_MDT_PE_A, mdt0, pe_number);
 		phb4_ioda_sel(p, IODA3_TBL_MDT, segment_num, false);
-		out_be64(p->regs + PHB_IODA_DATA0, mdt0);
+		phb4_write_reg(p, PHB_IODA_DATA0, mdt0);
 		break;
 	case OPAL_M64_WINDOW_TYPE:
 		if (window_num == 0 || window_num >= p->mbt_size)
@@ -1386,7 +1386,7 @@ static int64_t phb4_map_pe_dma_window(struct phb *phb,
 	 */
 	if (tce_table_size == 0) {
 		phb4_ioda_sel(p, IODA3_TBL_TVT, window_id, false);
-		out_be64(p->regs + PHB_IODA_DATA0, 0);
+		phb4_write_reg(p, PHB_IODA_DATA0, 0);
 		p->tve_cache[window_id] = 0;
 		return OPAL_SUCCESS;
 	}
@@ -1426,7 +1426,7 @@ static int64_t phb4_map_pe_dma_window(struct phb *phb,
 	data64 = SETFIELD(IODA3_TVT_NUM_LEVELS, data64, tce_levels - 1);
 
 	phb4_ioda_sel(p, IODA3_TBL_TVT, window_id, false);
-	out_be64(p->regs + PHB_IODA_DATA0, data64);
+	phb4_write_reg(p, PHB_IODA_DATA0, data64);
 	p->tve_cache[window_id] = data64;
 
 	return OPAL_SUCCESS;
@@ -1489,7 +1489,7 @@ static int64_t phb4_map_pe_dma_window_real(struct phb *phb,
 	}
 
 	phb4_ioda_sel(p, IODA3_TBL_TVT, window_id, false);
-	out_be64(p->regs + PHB_IODA_DATA0, tve);
+	phb4_write_reg(p, PHB_IODA_DATA0, tve);
 	p->tve_cache[window_id] = tve;
 
 	return OPAL_SUCCESS;
@@ -1580,12 +1580,12 @@ static int64_t phb4_set_ive_pe(struct phb *phb,
 	/* We need to inject the appropriate MIST write enable bit
 	 * in the IODA table address register
 	 */
-	val = in_be64(p->regs + PHB_IODA_ADDR);
+	val = phb4_read_reg(p, PHB_IODA_ADDR);
 	val = SETFIELD(PHB_IODA_AD_MIST_PWV, val, 8 >> mist_quad);
-	out_be64(p->regs + PHB_IODA_ADDR, val);
+	phb4_write_reg(p, PHB_IODA_ADDR, val);
 
 	/* Write entry */
-	out_be64(p->regs + PHB_IODA_DATA0, p->mist_cache[mist_idx]);
+	phb4_write_reg(p, PHB_IODA_DATA0, p->mist_cache[mist_idx]);
 
 	return OPAL_SUCCESS;
 }
@@ -2155,7 +2155,7 @@ static int64_t phb4_set_pe(struct phb *phb,
 			p->tbl_rtt[idx] = cpu_to_be16(pe_number);
 
 	/* Invalidate the RID Translation Cache (RTC) inside the PHB */
-	out_be64(p->regs + PHB_RTC_INVALIDATE, PHB_RTC_INVALIDATE_ALL);
+	phb4_write_reg(p, PHB_RTC_INVALIDATE, PHB_RTC_INVALIDATE_ALL);
 
 	return OPAL_SUCCESS;
 }
@@ -2208,15 +2208,15 @@ static void phb4_prepare_link_change(struct pci_slot *slot, bool is_up)
 		p->flags &= ~PHB4_CFG_BLOCKED;
 
 		/* Re-enable link down errors */
-		out_be64(p->regs + PHB_PCIE_MISC_STRAP,
+		phb4_write_reg(p, PHB_PCIE_MISC_STRAP,
 			 0x0000060000000000ull);
 
 		/* Re-enable error status indicators that trigger irqs */
-		out_be64(p->regs + PHB_REGB_ERR_INF_ENABLE,
+		phb4_write_reg(p, PHB_REGB_ERR_INF_ENABLE,
 			 0x2130006efca8bc00ull);
-		out_be64(p->regs + PHB_REGB_ERR_ERC_ENABLE,
+		phb4_write_reg(p, PHB_REGB_ERR_ERC_ENABLE,
 			 0x0080000000000000ull);
-		out_be64(p->regs + PHB_REGB_ERR_FAT_ENABLE,
+		phb4_write_reg(p, PHB_REGB_ERR_FAT_ENABLE,
 			 0xde0fff91035743ffull);
 
 	} else {
@@ -2228,12 +2228,12 @@ static void phb4_prepare_link_change(struct pci_slot *slot, bool is_up)
 				    PCIECAP_AER_CE_MASK, reg32);
 
 		/* Clear error link enable & error link down kill enable */
-		out_be64(p->regs + PHB_PCIE_MISC_STRAP, 0);
+		phb4_write_reg(p, PHB_PCIE_MISC_STRAP, 0);
 
 		/* Disable all error status indicators that trigger irqs */
-		out_be64(p->regs + PHB_REGB_ERR_INF_ENABLE, 0);
-		out_be64(p->regs + PHB_REGB_ERR_ERC_ENABLE, 0);
-		out_be64(p->regs + PHB_REGB_ERR_FAT_ENABLE, 0);
+		phb4_write_reg(p, PHB_REGB_ERR_INF_ENABLE, 0);
+		phb4_write_reg(p, PHB_REGB_ERR_ERC_ENABLE, 0);
+		phb4_write_reg(p, PHB_REGB_ERR_FAT_ENABLE, 0);
 
 		/* Block PCI-CFG access */
 		p->flags |= PHB4_CFG_BLOCKED;
@@ -2250,7 +2250,7 @@ static int64_t phb4_get_presence_state(struct pci_slot *slot, uint8_t *val)
 		return OPAL_HARDWARE;
 
 	/* Check hotplug status */
-	hps = in_be64(p->regs + PHB_PCIE_HOTPLUG_STATUS);
+	hps = phb4_read_reg(p, PHB_PCIE_HOTPLUG_STATUS);
 	if (!(hps & PHB_PCIE_HPSTAT_PRESENCE)) {
 		*val = OPAL_PCI_SLOT_PRESENT;
 	} else {
@@ -2259,7 +2259,7 @@ static int64_t phb4_get_presence_state(struct pci_slot *slot, uint8_t *val)
 		 * we are on a broken simulation environment and still
 		 * return a valid presence. Otherwise, not present.
 		 */
-		dtctl = in_be64(p->regs + PHB_PCIE_DLP_TRAIN_CTL);
+		dtctl = phb4_read_reg(p, PHB_PCIE_DLP_TRAIN_CTL);
 		if (dtctl & PHB_PCIE_DLP_TL_LINKACT) {
 			PHBERR(p, "Presence detect 0 but link set !\n");
 			*val = OPAL_PCI_SLOT_PRESENT;
@@ -2281,7 +2281,7 @@ static int64_t phb4_get_link_info(struct pci_slot *slot, uint8_t *speed,
 	uint8_t s;
 
 	/* Link is up, let's find the actual speed */
-	reg = in_be64(p->regs + PHB_PCIE_DLP_TRAIN_CTL);
+	reg = phb4_read_reg(p, PHB_PCIE_DLP_TRAIN_CTL);
 	if (!(reg & PHB_PCIE_DLP_TL_LINKACT)) {
 		*width = 0;
 		if (speed)
@@ -2478,7 +2478,7 @@ static bool phb4_fenced(struct phb4 *p)
 	 * An all 1's from the PHB indicates a PHB freeze/fence. We
 	 * don't really differenciate them at this point.
 	 */
-	if (in_be64(p->regs + PHB_CPU_LOADSTORE_STATUS)!= 0xfffffffffffffffful)
+	if (phb4_read_reg(p, PHB_CPU_LOADSTORE_STATUS)!= 0xfffffffffffffffful)
 		return false;
 
 	/* Mark ourselves fenced */
@@ -2636,10 +2636,10 @@ static bool phb4_link_optimal(struct pci_slot *slot, uint32_t *vdid)
 	retry_enabled = (phb4_chip_retry_workaround() &&
 			 phb4_adapter_in_whitelist(id)) ||
 		phb4_lane_eq_retry_whitelist(id);
-	reg = in_be64(p->regs + PHB_PCIE_DLP_ERR_COUNTERS);
+	reg = phb4_read_reg(p, PHB_PCIE_DLP_ERR_COUNTERS);
 	rx_errs =  GETFIELD(PHB_PCIE_DLP_RX_ERR_CNT, reg);
 	rx_err_ok = (rx_errs < rx_err_max);
-	reg = in_be64(p->regs + PHB_PCIE_DLP_ERR_STATUS);
+	reg = phb4_read_reg(p, PHB_PCIE_DLP_ERR_STATUS);
 	lane_errs = GETFIELD(PHB_PCIE_DLP_LANE_ERR, reg);
 
 	PHBDBG(p, "LINK: Card [%04x:%04x] %s Retry:%s\n", VENDOR(id),
@@ -2691,7 +2691,7 @@ static void phb4_link_trace(struct phb4 *p, uint64_t target_state, int max_ms)
 	now = start;
 
 	do {
-		reg = in_be64(p->regs + PHB_PCIE_DLP_TRAIN_CTL);
+		reg = phb4_read_reg(p, PHB_PCIE_DLP_TRAIN_CTL);
 		if (reg != reglast)
 			state = phb4_train_info(p, reg, now - start);
 		reglast = reg;
@@ -2806,7 +2806,7 @@ static int64_t phb4_poll_link(struct pci_slot *slot)
 		 * because simics doesn't seem to implement the electrical
 		 * link bit at all
 		 */
-		reg = in_be64(p->regs + PHB_PCIE_DLP_TRAIN_CTL);
+		reg = phb4_read_reg(p, PHB_PCIE_DLP_TRAIN_CTL);
 		if (!phb4_check_reg(p, reg)) {
 			PHBERR(p, "PHB fence waiting for electrical link\n");
 			return phb4_retry_state(slot);
@@ -2828,7 +2828,7 @@ static int64_t phb4_poll_link(struct pci_slot *slot)
 		/* Retry */
 		return pci_slot_set_sm_timeout(slot, msecs_to_tb(10));
 	case PHB4_SLOT_LINK_WAIT:
-		reg = in_be64(p->regs + PHB_PCIE_DLP_TRAIN_CTL);
+		reg = phb4_read_reg(p, PHB_PCIE_DLP_TRAIN_CTL);
 		if (!phb4_check_reg(p, reg)) {
 			PHBERR(p, "LINK: PHB fence waiting for link training\n");
 			return phb4_retry_state(slot);
@@ -2853,7 +2853,7 @@ static int64_t phb4_poll_link(struct pci_slot *slot)
 			PHBERR(p, "LINK: PHB fenced waiting for stabilty\n");
 			return phb4_retry_state(slot);
 		}
-		reg = in_be64(p->regs + PHB_PCIE_DLP_TRAIN_CTL);
+		reg = phb4_read_reg(p, PHB_PCIE_DLP_TRAIN_CTL);
 		if (!phb4_check_reg(p, reg)) {
 			PHBERR(p, "LINK: PHB fence reading training control\n");
 			return phb4_retry_state(slot);
@@ -3540,7 +3540,7 @@ static int64_t phb4_eeh_freeze_status(struct phb *phb, uint64_t pe_number,
 
 	/* Check the PEEV */
 	phb4_ioda_sel(p, IODA3_TBL_PEEV, pe_number / 64, false);
-	peev = in_be64(p->regs + PHB_IODA_DATA0);
+	peev = phb4_read_reg(p, PHB_IODA_DATA0);
 	if (!(peev & peev_bit))
 		return OPAL_SUCCESS;
 
@@ -3587,7 +3587,7 @@ static int64_t phb4_eeh_freeze_clear(struct phb *phb, uint64_t pe_number,
 	 * contain a freeze state from a previous error or simply set
 	 * explicitely by the user
 	 */
-	err = in_be64(p->regs + PHB_ETU_ERR_SUMMARY);
+	err = phb4_read_reg(p, PHB_ETU_ERR_SUMMARY);
 	if (err == 0xffffffffffffffffUL) {
 		if (phb4_fenced(p)) {
 			PHBERR(p, "eeh_freeze_clear on fenced PHB\n");
@@ -3603,18 +3603,18 @@ static int64_t phb4_eeh_freeze_clear(struct phb *phb, uint64_t pe_number,
 	 */
 	if (eeh_action_token & OPAL_EEH_ACTION_CLEAR_FREEZE_MMIO) {
 		phb4_ioda_sel(p, IODA3_TBL_PESTA, pe_number, false);
-		out_be64(p->regs + PHB_IODA_DATA0, 0);
+		phb4_write_reg(p, PHB_IODA_DATA0, 0);
 	}
 	if (eeh_action_token & OPAL_EEH_ACTION_CLEAR_FREEZE_DMA) {
 		phb4_ioda_sel(p, IODA3_TBL_PESTB, pe_number, false);
-		out_be64(p->regs + PHB_IODA_DATA0, 0);
+		phb4_write_reg(p, PHB_IODA_DATA0, 0);
 	}
 
 
 	/* Update ER pending indication */
 	phb4_ioda_sel(p, IODA3_TBL_PEEV, 0, true);
 	for (i = 0; i < p->num_pes/64; i++) {
-		peev = in_be64(p->regs + PHB_IODA_DATA0);
+		peev = phb4_read_reg(p, PHB_IODA_DATA0);
 		if (peev) {
 			frozen_pe = true;
 			break;
@@ -3650,16 +3650,16 @@ static int64_t phb4_eeh_freeze_set(struct phb *phb, uint64_t pe_number,
 
 	if (eeh_action_token & OPAL_EEH_ACTION_SET_FREEZE_MMIO) {
 		phb4_ioda_sel(p, IODA3_TBL_PESTA, pe_number, false);
-		data = in_be64(p->regs + PHB_IODA_DATA0);
+		data = phb4_read_reg(p, PHB_IODA_DATA0);
 		data |= IODA3_PESTA_MMIO_FROZEN;
-		out_be64(p->regs + PHB_IODA_DATA0, data);
+		phb4_write_reg(p, PHB_IODA_DATA0, data);
 	}
 
 	if (eeh_action_token & OPAL_EEH_ACTION_SET_FREEZE_DMA) {
 		phb4_ioda_sel(p, IODA3_TBL_PESTB, pe_number, false);
-		data = in_be64(p->regs + PHB_IODA_DATA0);
+		data = phb4_read_reg(p, PHB_IODA_DATA0);
 		data |= IODA3_PESTB_DMA_STOPPED;
-		out_be64(p->regs + PHB_IODA_DATA0, data);
+		phb4_write_reg(p, PHB_IODA_DATA0, data);
 	}
 
 	return OPAL_SUCCESS;
@@ -3707,7 +3707,7 @@ static int64_t phb4_eeh_next_error(struct phb *phb,
 	if (!phb4_err_pending(p)) {
 		phb4_ioda_sel(p, IODA3_TBL_PEEV, 0, true);
 		for (i = 0; i < peev_size; i++) {
-			peev = in_be64(p->regs + PHB_IODA_DATA0);
+			peev = phb4_read_reg(p, PHB_IODA_DATA0);
 			if (peev) {
 				p->err.err_src	 = PHB4_ERR_SRC_PHB;
 				p->err.err_class = PHB4_ERR_CLASS_ER;
@@ -3728,7 +3728,7 @@ static int64_t phb4_eeh_next_error(struct phb *phb,
 	if (p->err.err_class == PHB4_ERR_CLASS_ER) {
 		for (i = peev_size - 1; i >= 0; i--) {
 			phb4_ioda_sel(p, IODA3_TBL_PEEV, i, false);
-			peev = in_be64(p->regs + PHB_IODA_DATA0);
+			peev = phb4_read_reg(p, PHB_IODA_DATA0);
 			for (j = 0; j < 64; j++) {
 				if (peev & PPC_BIT(j)) {
 					*first_frozen_pe = i * 64 + j;
@@ -3782,7 +3782,7 @@ static int64_t phb4_eeh_next_error(struct phb *phb,
 	return OPAL_SUCCESS;
 }
 
-static int64_t phb4_err_inject_finalize(struct phb4 *phb, uint64_t addr,
+static int64_t phb4_err_inject_finalize(struct phb4 *p, uint64_t addr,
 					uint64_t mask, uint64_t ctrl,
 					bool is_write)
 {
@@ -3791,9 +3791,9 @@ static int64_t phb4_err_inject_finalize(struct phb4 *phb, uint64_t addr,
 	else
 		ctrl |= PHB_PAPR_ERR_INJ_CTL_RD;
 
-	out_be64(phb->regs + PHB_PAPR_ERR_INJ_ADDR, addr);
-	out_be64(phb->regs + PHB_PAPR_ERR_INJ_MASK, mask);
-	out_be64(phb->regs + PHB_PAPR_ERR_INJ_CTL, ctrl);
+	phb4_write_reg(p, PHB_PAPR_ERR_INJ_ADDR, addr);
+	phb4_write_reg(p, PHB_PAPR_ERR_INJ_MASK, mask);
+	phb4_write_reg(p, PHB_PAPR_ERR_INJ_CTL, ctrl);
 
 	return OPAL_SUCCESS;
 }
@@ -3916,7 +3916,7 @@ static int64_t phb4_err_inject(struct phb *phb, uint64_t pe_number,
 		return OPAL_PARAMETER;
 
 	/* Clear leftover from last time */
-	out_be64(p->regs + PHB_PAPR_ERR_INJ_CTL, 0x0ul);
+	phb4_write_reg(p, PHB_PAPR_ERR_INJ_CTL, 0x0ul);
 
 	switch (func) {
 	case OPAL_ERR_INJECT_FUNC_IOA_LD_MEM_ADDR:
@@ -4228,20 +4228,20 @@ static void phb4_init_capp_errors(struct phb4 *p)
 {
 	/* Init_77: TXE Error AIB Fence Enable Register */
 	if (phb4_is_dd20(p))
-		out_be64(p->regs + 0x0d30,	0xdfffbf0ff7ddfff0ull);
+		phb4_write_reg(p, 0x0d30, 0xdfffbf0ff7ddfff0ull);
 	else
-		out_be64(p->regs + 0x0d30,	0xdff7bf0ff7ddfff0ull);
+		phb4_write_reg(p, 0x0d30, 0xdff7bf0ff7ddfff0ull);
 	/* Init_86: RXE_ARB Error AIB Fence Enable Register */
-	out_be64(p->regs + 0x0db0,	0xfbffd7bbfb7fbfefull);
+	phb4_write_reg(p, 0x0db0, 0xfbffd7bbfb7fbfefull);
 
-	/* Init_95: RXE_MRG Error AIB Fence Enable Register */
-	out_be64(p->regs + 0x0e30,	0xfffffeffff7fff57ull);
+	/* Init_95: //E_MRG Error AIB Fence Enable Register */
+	phb4_write_reg(p, 0x0e30, 0xfffffeffff7fff57ull);
 
 	/* Init_104: RXE_TCE Error AIB Fence Enable Register */
-	out_be64(p->regs + 0x0eb0,	0xffaeffafffffffffull);
+	phb4_write_reg(p, 0x0eb0, 0xffaeffafffffffffull);
 
 	/* Init_113: PHB Error AIB Fence Enable Register */
-	out_be64(p->regs + 0x0cb0,	0x35777073ff000000ull);
+	phb4_write_reg(p, 0x0cb0, 0x35777073ff000000ull);
 }
 
  /*
@@ -4428,7 +4428,7 @@ static int64_t enable_capi_mode(struct phb4 *p, uint64_t pe_number,
 	 * Bit [0:7] XSL_DSNCTL[capiind]
 	 * Init_26 - CAPI Compare/Mask
 	 */
-	out_be64(p->regs + PHB_CAPI_CMPM,
+	phb4_write_reg(p, PHB_CAPI_CMPM,
 		 ((u64)CAPIIND << 48) |
 		 ((u64)CAPIMASK << 32) | PHB_CAPI_CMPM_ENABLE);
 
@@ -4443,7 +4443,7 @@ static int64_t enable_capi_mode(struct phb4 *p, uint64_t pe_number,
 	xscom_write(p->chip_id, p->pci_xscom + XPEC_PCI_PBAIB_HW_CONFIG, reg);
 
 	/* non-translate/50-bit mode */
-	out_be64(p->regs + PHB_NXLATE_PREFIX, 0x0000000000000000Ull);
+	phb4_write_reg(p, PHB_NXLATE_PREFIX, 0x0000000000000000Ull);
 
 	/* set tve no translate mode allow mmio window */
 	memset(p->tve_cache, 0x0, sizeof(p->tve_cache));
@@ -4480,16 +4480,16 @@ static int64_t enable_capi_mode(struct phb4 *p, uint64_t pe_number,
 
 	phb4_ioda_sel(p, IODA3_TBL_TVT, 0, true);
 	for (i = 0; i < p->tvt_size; i++)
-		out_be64(p->regs + PHB_IODA_DATA0, p->tve_cache[i]);
+		phb4_write_reg(p, PHB_IODA_DATA0, p->tve_cache[i]);
 
 	/*
 	 * Since TVT#0 is in by-pass mode, disable 32-bit MSI, as a
 	 * DMA write targeting 0x00000000FFFFxxxx would be interpreted
 	 * as a 32-bit MSI
 	 */
-	reg = in_be64(p->regs + PHB_PHB4_CONFIG);
+	reg = phb4_read_reg(p, PHB_PHB4_CONFIG);
 	reg &= ~PHB_PHB4C_32BIT_MSI_EN;
-	out_be64(p->regs + PHB_PHB4_CONFIG, reg);
+	phb4_write_reg(p, PHB_PHB4_CONFIG, reg);
 
 	/* set mbt bar to pass capi mmio window and keep the other
 	 * mmio values
@@ -4522,8 +4522,8 @@ static int64_t enable_capi_mode(struct phb4 *p, uint64_t pe_number,
 		p->mbt_cache[window_num][1] = mbt1;
 
 		phb4_ioda_sel(p, IODA3_TBL_MBT, window_num << 1, true);
-		out_be64(p->regs + PHB_IODA_DATA0, mbt0);
-		out_be64(p->regs + PHB_IODA_DATA0, mbt1);
+		phb4_write_reg(p, PHB_IODA_DATA0, mbt0);
+		phb4_write_reg(p, PHB_IODA_DATA0, mbt1);
 	} else if (i == p->mbt_size) {
 		/* mbt cache full, this case should never happen */
 		PHBERR(p, "CAPP: Failed to add CAPI mmio window\n");
@@ -4699,7 +4699,7 @@ static void phb4_p2p_set_initiator(struct phb4 *p, uint16_t pe_number)
 	PHBDBG(p, "Setting TVE#1 for peer-to-peer for pe %d\n", pe_number);
 	tve = PPC_BIT(51);
 	phb4_ioda_sel(p, IODA3_TBL_TVT, window_id, false);
-	out_be64(p->regs + PHB_IODA_DATA0, tve);
+	phb4_write_reg(p, PHB_IODA_DATA0, tve);
 	p->tve_cache[window_id] = tve;
 }
 
@@ -4852,57 +4852,57 @@ static const struct phb_ops phb4_ops = {
 static void phb4_init_ioda3(struct phb4 *p)
 {
 	/* Init_18 - Interrupt Notify Base Address */
-	out_be64(p->regs + PHB_INT_NOTIFY_ADDR, p->irq_port);
+	phb4_write_reg(p, PHB_INT_NOTIFY_ADDR, p->irq_port);
 
 	/* Init_19 - Interrupt Notify Base Index */
-	out_be64(p->regs + PHB_INT_NOTIFY_INDEX,
+	phb4_write_reg(p, PHB_INT_NOTIFY_INDEX,
 		 xive_get_notify_base(p->base_msi));
 
 	/* Init_19x - Not in spec: Initialize source ID */
 	PHBDBG(p, "Reset state SRC_ID: %016llx\n",
-	       in_be64(p->regs + PHB_LSI_SOURCE_ID));
-	out_be64(p->regs + PHB_LSI_SOURCE_ID,
+	       phb4_read_reg(p, PHB_LSI_SOURCE_ID));
+	phb4_write_reg(p, PHB_LSI_SOURCE_ID,
 		 SETFIELD(PHB_LSI_SRC_ID, 0ull, (p->num_irqs - 1) >> 3));
 
 	/* Init_20 - RTT BAR */
-	out_be64(p->regs + PHB_RTT_BAR, (u64) p->tbl_rtt | PHB_RTT_BAR_ENABLE);
+	phb4_write_reg(p, PHB_RTT_BAR, (u64) p->tbl_rtt | PHB_RTT_BAR_ENABLE);
 
 	/* Init_21 - PELT-V BAR */
-	out_be64(p->regs + PHB_PELTV_BAR,
+	phb4_write_reg(p, PHB_PELTV_BAR,
 		 (u64) p->tbl_peltv | PHB_PELTV_BAR_ENABLE);
 
 	/* Init_22 - Setup M32 starting address */
-	out_be64(p->regs + PHB_M32_START_ADDR, M32_PCI_START);
+	phb4_write_reg(p, PHB_M32_START_ADDR, M32_PCI_START);
 
 	/* Init_23 - Setup PEST BAR */
-	out_be64(p->regs + PHB_PEST_BAR,
+	phb4_write_reg(p, PHB_PEST_BAR,
 		 p->tbl_pest | PHB_PEST_BAR_ENABLE);
 
 	/* Init_24 - CRW Base Address Reg */
 	/* See enable_capi_mode() */
 
 	/* Init_25 - ASN Compare/Mask */
-	out_be64(p->regs + PHB_ASN_CMPM, ((u64)ASNIND << 48) |
+	phb4_write_reg(p, PHB_ASN_CMPM, ((u64)ASNIND << 48) |
 		 ((u64)ASNMASK << 32) | PHB_ASN_CMPM_ENABLE);
 
 	/* Init_26 - CAPI Compare/Mask */
 	/* See enable_capi_mode() */
 	/* if CAPP being disabled then reset CAPI Compare/Mask Register */
 	if (p->flags & PHB4_CAPP_DISABLE)
-		out_be64(p->regs + PHB_CAPI_CMPM, 0);
+		phb4_write_reg(p, PHB_CAPI_CMPM, 0);
 
 	/* Init_27 - PCIE Outbound upper address */
-	out_be64(p->regs + PHB_M64_UPPER_BITS, 0);
+	phb4_write_reg(p, PHB_M64_UPPER_BITS, 0);
 
 	/* Init_28 - PHB4 Configuration */
-	out_be64(p->regs + PHB_PHB4_CONFIG,
+	phb4_write_reg(p, PHB_PHB4_CONFIG,
 		 PHB_PHB4C_32BIT_MSI_EN |
 		 PHB_PHB4C_64BIT_MSI_EN);
 
 	/* Init_29 - At least 256ns delay according to spec. Do a dummy
 	 * read first to flush posted writes
 	 */
-	in_be64(p->regs + PHB_PHB4_CONFIG);
+	phb4_read_reg(p, PHB_PHB4_CONFIG);
 	time_wait_us(2);
 
 	/* Init_30..41 - On-chip IODA tables init */
@@ -4996,114 +4996,114 @@ static bool phb4_init_rc_cfg(struct phb4 *p)
 static void phb4_init_errors(struct phb4 *p)
 {
 	/* Init_55..63 - PBL errors */
-	out_be64(p->regs + 0x1900,	0xffffffffffffffffull);
-	out_be64(p->regs + 0x1908,	0x0000000000000000ull);
-	out_be64(p->regs + 0x1920,	0x000000004d1780f8ull);
-	out_be64(p->regs + 0x1928,	0x0000000000000000ull);
-	out_be64(p->regs + 0x1930,	0xffffffffb2f87f07ull);
-	out_be64(p->regs + 0x1940,	0x0000000000000000ull);
-	out_be64(p->regs + 0x1948,	0x0000000000000000ull);
-	out_be64(p->regs + 0x1950,	0x0000000000000000ull);
-	out_be64(p->regs + 0x1958,	0x0000000000000000ull);
+	phb4_write_reg(p, 0x1900, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x1908, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x1920, 0x000000004d1780f8ull);
+	phb4_write_reg(p, 0x1928, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x1930, 0xffffffffb2f87f07ull);
+	phb4_write_reg(p, 0x1940, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x1948, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x1950, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x1958, 0x0000000000000000ull);
 
 	/* Init_64..72 - REGB errors */
-	out_be64(p->regs + 0x1c00,	0xffffffffffffffffull);
-	out_be64(p->regs + 0x1c08,	0x0000000000000000ull);
+	phb4_write_reg(p, 0x1c00, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x1c08, 0x0000000000000000ull);
 	/* Enable/disable error status indicators that trigger irqs */
 	if (p->has_link) {
-		out_be64(p->regs + 0x1c20,	0x2130006efca8bc00ull);
-		out_be64(p->regs + 0x1c30,	0xde1fff91035743ffull);
+		phb4_write_reg(p, 0x1c20, 0x2130006efca8bc00ull);
+		phb4_write_reg(p, 0x1c30, 0xde1fff91035743ffull);
 	} else {
-		out_be64(p->regs + 0x1c20,	0x0000000000000000ull);
-		out_be64(p->regs + 0x1c30,	0x0000000000000000ull);
+		phb4_write_reg(p, 0x1c20, 0x0000000000000000ull);
+		phb4_write_reg(p, 0x1c30, 0x0000000000000000ull);
 	}
-	out_be64(p->regs + 0x1c28,	0x0080000000000000ull);
-	out_be64(p->regs + 0x1c40,	0x0000000000000000ull);
-	out_be64(p->regs + 0x1c48,	0x0000000000000000ull);
-	out_be64(p->regs + 0x1c50,	0x0000000000000000ull);
-	out_be64(p->regs + 0x1c58,	0x0040000000000000ull);
+	phb4_write_reg(p, 0x1c28, 0x0080000000000000ull);
+	phb4_write_reg(p, 0x1c40, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x1c48, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x1c50, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x1c58, 0x0040000000000000ull);
 
 	/* Init_73..81 - TXE errors */
-	out_be64(p->regs + 0x0d08,	0x0000000000000000ull);
+	phb4_write_reg(p, 0x0d08, 0x0000000000000000ull);
 	/* Errata: Clear bit 17, otherwise a CFG write UR/CA will incorrectly
 	 * freeze a "random" PE (whatever last PE did an MMIO)
 	 */
-	out_be64(p->regs + 0x0d28,	0x0000000a00000000ull);
+	phb4_write_reg(p, 0x0d28, 0x0000000a00000000ull);
 	if (phb4_is_dd20(p)) {
-		out_be64(p->regs + 0x0d00,	0xf3acff0ff7ddfff0ull);
-		out_be64(p->regs + 0x0d18,	0xf3acff0ff7ddfff0ull);
-		out_be64(p->regs + 0x0d30,	0xdfffbd05f7ddfff0ull); /* XXX CAPI has diff. value */
+		phb4_write_reg(p, 0x0d00, 0xf3acff0ff7ddfff0ull);
+		phb4_write_reg(p, 0x0d18, 0xf3acff0ff7ddfff0ull);
+		phb4_write_reg(p, 0x0d30, 0xdfffbd05f7ddfff0ull); /* XXX CAPI has diff. value */
 	} else  {
-		out_be64(p->regs + 0x0d00,	0xffffffffffffffffull);
-		out_be64(p->regs + 0x0d18,	0xffffff0fffffffffull);
-		out_be64(p->regs + 0x0d30,	0xdff7bd05f7ddfff0ull);
+		phb4_write_reg(p, 0x0d00, 0xffffffffffffffffull);
+		phb4_write_reg(p, 0x0d18, 0xffffff0fffffffffull);
+		phb4_write_reg(p, 0x0d30, 0xdff7bd05f7ddfff0ull);
 	}
 
-	out_be64(p->regs + 0x0d40,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0d48,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0d50,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0d58,	0x0000000000000000ull);
+	phb4_write_reg(p, 0x0d40, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0d48, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0d50, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0d58, 0x0000000000000000ull);
 
 	/* Init_82..90 - RXE_ARB errors */
-	out_be64(p->regs + 0x0d80,	0xffffffffffffffffull);
-	out_be64(p->regs + 0x0d88,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0d98,	0xfffffffffbffffffull);
-	out_be64(p->regs + 0x0da8,	0xc00018b801000060ull);
+	phb4_write_reg(p, 0x0d80, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x0d88, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0d98, 0xfffffffffbffffffull);
+	phb4_write_reg(p, 0x0da8, 0xc00018b801000060ull);
 	/*
 	 * Errata ER20161123 says we should set the top two bits in
 	 * 0x0db0 but this causes config space accesses which don't
 	 * get a response to fence the PHB. This breaks probing,
 	 * hence we don't set them here.
 	 */
-	out_be64(p->regs + 0x0db0,	0x3bffd703fa7fbf8full); /* XXX CAPI has diff. value */
-	out_be64(p->regs + 0x0dc0,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0dc8,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0dd0,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0dd8,	0x0000000004000000ull);
+	phb4_write_reg(p, 0x0db0, 0x3bffd703fa7fbf8full); /* XXX CAPI has diff. value */
+	phb4_write_reg(p, 0x0dc0, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0dc8, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0dd0, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0dd8, 0x0000000004000000ull);
 
 	/* Init_91..99 - RXE_MRG errors */
-	out_be64(p->regs + 0x0e00,	0xffffffffffffffffull);
-	out_be64(p->regs + 0x0e08,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0e18,	0xffffffffffffffffull);
-	out_be64(p->regs + 0x0e28,	0x0000600000000000ull);
-	out_be64(p->regs + 0x0e30,	0xfffffeffff7fff57ull);
-	out_be64(p->regs + 0x0e40,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0e48,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0e50,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0e58,	0x0000000000000000ull);
+	phb4_write_reg(p, 0x0e00, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x0e08, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0e18, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x0e28, 0x0000600000000000ull);
+	phb4_write_reg(p, 0x0e30, 0xfffffeffff7fff57ull);
+	phb4_write_reg(p, 0x0e40, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0e48, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0e50, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0e58, 0x0000000000000000ull);
 
 	/* Init_100..108 - RXE_TCE errors */
-	out_be64(p->regs + 0x0e80,	0xffffffffffffffffull);
-	out_be64(p->regs + 0x0e88,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0e98,	0xffffffffffffffffull);
-	out_be64(p->regs + 0x0ea8,	0x60000000c0000000ull);
-	out_be64(p->regs + 0x0eb0,	0x9faeffaf3fffffffull); /* XXX CAPI has diff. value */
-	out_be64(p->regs + 0x0ec0,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0ec8,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0ed0,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0ed8,	0x0000000000000000ull);
+	phb4_write_reg(p, 0x0e80, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x0e88, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0e98, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x0ea8, 0x60000000c0000000ull);
+	phb4_write_reg(p, 0x0eb0, 0x9faeffaf3fffffffull); /* XXX CAPI has diff. value */
+	phb4_write_reg(p, 0x0ec0, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0ec8, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0ed0, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0ed8, 0x0000000000000000ull);
 
 	/* Init_109..117 - RXPHB errors */
-	out_be64(p->regs + 0x0c80,	0xffffffffffffffffull);
-	out_be64(p->regs + 0x0c88,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0c98,	0xffffffffffffffffull);
-	out_be64(p->regs + 0x0ca8,	0x0000004000000000ull);
-	out_be64(p->regs + 0x0cb0,	0x35777033ff000000ull); /* XXX CAPI has diff. value */
-	out_be64(p->regs + 0x0cc0,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0cc8,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0cd0,	0x0000000000000000ull);
-	out_be64(p->regs + 0x0cd8,	0x0000000000000000ull);
+	phb4_write_reg(p, 0x0c80, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x0c88, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0c98, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x0ca8, 0x0000004000000000ull);
+	phb4_write_reg(p, 0x0cb0, 0x35777033ff000000ull); /* XXX CAPI has diff. value */
+	phb4_write_reg(p, 0x0cc0, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0cc8, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0cd0, 0x0000000000000000ull);
+	phb4_write_reg(p, 0x0cd8, 0x0000000000000000ull);
 
 	/* Init_118..121 - LEM */
-	out_be64(p->regs + 0x0c00,	0x0000000000000000ull);
+	phb4_write_reg(p, 0x0c00, 0x0000000000000000ull);
 	if (phb4_is_dd20(p)) {
-		out_be64(p->regs + 0x0c30,	0xf3ffffffffffffffull);
-		out_be64(p->regs + 0x0c38,	0xf3ffffffffffffffull);
+		phb4_write_reg(p, 0x0c30, 0xf3ffffffffffffffull);
+		phb4_write_reg(p, 0x0c38, 0xf3ffffffffffffffull);
 	} else {
-		out_be64(p->regs + 0x0c30,	0xffffffffffffffffull);
-		out_be64(p->regs + 0x0c38,	0xffffffffffffffffull);
+		phb4_write_reg(p, 0x0c30, 0xffffffffffffffffull);
+		phb4_write_reg(p, 0x0c38, 0xffffffffffffffffull);
 	}
-	out_be64(p->regs + 0x0c40,	0x0000000000000000ull);
+	phb4_write_reg(p, 0x0c40, 0x0000000000000000ull);
 }
 
 
@@ -5128,7 +5128,7 @@ static bool phb4_wait_dlp_reset(struct phb4 *p)
 
 	PHBDBG(p, "Waiting for DLP PG reset to complete...\n");
 	for (i = 0; i < DLP_RESET_ATTEMPTS; i++) {
-		val = in_be64(p->regs + PHB_PCIE_DLP_TRAIN_CTL);
+		val = phb4_read_reg(p, PHB_PCIE_DLP_TRAIN_CTL);
 		if (!(val & PHB_PCIE_DLP_DL_PGRESET))
 			break;
 		time_wait_ms(1);
@@ -5151,43 +5151,43 @@ static void phb4_init_hw(struct phb4 *p)
 	 */
 
 	/* Init_2 - Mask FIRs */
-	out_be64(p->regs + PHB_LEM_ERROR_MASK,			0xffffffffffffffffull);
+	phb4_write_reg(p, PHB_LEM_ERROR_MASK, 0xffffffffffffffffull);
 
 	/* Init_3 - TCE tag enable */
-	out_be64(p->regs + PHB_TCE_TAG_ENABLE,			0xffffffffffffffffull);
+	phb4_write_reg(p, PHB_TCE_TAG_ENABLE, 0xffffffffffffffffull);
 
 	/* Init_4 - PCIE System Configuration Register
 	 *
 	 * Adjust max speed based on system config
 	 */
-	val = in_be64(p->regs + PHB_PCIE_SCR);
+	val = phb4_read_reg(p, PHB_PCIE_SCR);
 	PHBDBG(p, "Default system config: 0x%016llx\n", val);
 	val = SETFIELD(PHB_PCIE_SCR_MAXLINKSPEED, val, p->max_link_speed);
-	out_be64(p->regs + PHB_PCIE_SCR, val);
+	phb4_write_reg(p, PHB_PCIE_SCR, val);
 	PHBDBG(p, "New system config    : 0x%016llx\n",
-	       in_be64(p->regs + PHB_PCIE_SCR));
+	       phb4_read_reg(p, PHB_PCIE_SCR));
 
 	/* Init_5 - deassert CFG reset */
-	creset = in_be64(p->regs + PHB_PCIE_CRESET);
+	creset = phb4_read_reg(p, PHB_PCIE_CRESET);
 	PHBDBG(p, "Initial PHB CRESET is 0x%016llx\n", creset);
 	creset &= ~PHB_PCIE_CRESET_CFG_CORE;
-	out_be64(p->regs + PHB_PCIE_CRESET,			creset);
+	phb4_write_reg(p, PHB_PCIE_CRESET, creset);
 
 	/* Init_6..13 - PCIE DLP Lane EQ control */
 	if (p->lane_eq) {
-		out_be64(p->regs + PHB_PCIE_LANE_EQ_CNTL0, be64_to_cpu(p->lane_eq[0]));
-		out_be64(p->regs + PHB_PCIE_LANE_EQ_CNTL1, be64_to_cpu(p->lane_eq[1]));
-		out_be64(p->regs + PHB_PCIE_LANE_EQ_CNTL2, be64_to_cpu(p->lane_eq[2]));
-		out_be64(p->regs + PHB_PCIE_LANE_EQ_CNTL3, be64_to_cpu(p->lane_eq[3]));
-		out_be64(p->regs + PHB_PCIE_LANE_EQ_CNTL20, be64_to_cpu(p->lane_eq[4]));
-		out_be64(p->regs + PHB_PCIE_LANE_EQ_CNTL21, be64_to_cpu(p->lane_eq[5]));
+		phb4_write_reg(p, PHB_PCIE_LANE_EQ_CNTL0, be64_to_cpu(p->lane_eq[0]));
+		phb4_write_reg(p, PHB_PCIE_LANE_EQ_CNTL1, be64_to_cpu(p->lane_eq[1]));
+		phb4_write_reg(p, PHB_PCIE_LANE_EQ_CNTL2, be64_to_cpu(p->lane_eq[2]));
+		phb4_write_reg(p, PHB_PCIE_LANE_EQ_CNTL3, be64_to_cpu(p->lane_eq[3]));
+		phb4_write_reg(p, PHB_PCIE_LANE_EQ_CNTL20, be64_to_cpu(p->lane_eq[4]));
+		phb4_write_reg(p, PHB_PCIE_LANE_EQ_CNTL21, be64_to_cpu(p->lane_eq[5]));
 	}
 	if (!p->lane_eq_en) {
 		/* Read modify write and set to 2 bits */
 		PHBDBG(p, "LINK: Disabling Lane EQ\n");
-		val = in_be64(p->regs + PHB_PCIE_DLP_CTL);
+		val = phb4_read_reg(p, PHB_PCIE_DLP_CTL);
 		val |= PHB_PCIE_DLP_CTL_BYPASS_PH2 | PHB_PCIE_DLP_CTL_BYPASS_PH3;
-		out_be64(p->regs + PHB_PCIE_DLP_CTL, val);
+		phb4_write_reg(p, PHB_PCIE_DLP_CTL, val);
 	}
 
 	/* Init_14 - Clear link training */
@@ -5201,7 +5201,7 @@ static void phb4_init_hw(struct phb4 *p)
 	 */
 	creset &= ~(PHB_PCIE_CRESET_TLDLP | PHB_PCIE_CRESET_PBL);
 	creset |= PHB_PCIE_CRESET_PIPE_N;
-	out_be64(p->regs + PHB_PCIE_CRESET,			   creset);
+	phb4_write_reg(p, PHB_PCIE_CRESET,    creset);
 
 	/* Init_16 - Wait for DLP PGRESET to clear */
 	if (!phb4_wait_dlp_reset(p))
@@ -5216,16 +5216,16 @@ static void phb4_init_hw(struct phb4 *p)
 	if (!pci_eeh_mmio)
 		val |= PHB_CTRLR_MMIO_EEH_DISABLE;
 
-	out_be64(p->regs + PHB_CTRLR, val);
+	phb4_write_reg(p, PHB_CTRLR, val);
 
 	/* Init_18..41 - Architected IODA3 inits */
 	phb4_init_ioda3(p);
 
 	/* Init_42..45 - Clear DLP error logs */
-	out_be64(p->regs + 0x1aa0,			0xffffffffffffffffull);
-	out_be64(p->regs + 0x1aa8,			0xffffffffffffffffull);
-	out_be64(p->regs + 0x1ab0,			0xffffffffffffffffull);
-	out_be64(p->regs + 0x1ab8,			0x0);
+	phb4_write_reg(p, 0x1aa0, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x1aa8, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x1ab0, 0xffffffffffffffffull);
+	phb4_write_reg(p, 0x1ab8, 0x0);
 
 
 	/* Init_46..54 : Init root complex config space */
@@ -5263,30 +5263,30 @@ static void phb4_init_hw(struct phb4 *p)
 			    PCI_CFG_STAT_RECV_PERR);
 
 	/* Init_126..130 - Re-enable error interrupts */
-	out_be64(p->regs + PHB_ERR_IRQ_ENABLE,			0xca8880cc00000000ull);
+	phb4_write_reg(p, PHB_ERR_IRQ_ENABLE, 0xca8880cc00000000ull);
 	if (phb4_is_dd20(p))
-		out_be64(p->regs + PHB_TXE_ERR_IRQ_ENABLE,		0x2000400e08200000ull);
+		phb4_write_reg(p, PHB_TXE_ERR_IRQ_ENABLE, 0x2000400e08200000ull);
 	else
-		out_be64(p->regs + PHB_TXE_ERR_IRQ_ENABLE,		0x2008400e08200000ull);
-	out_be64(p->regs + PHB_RXE_ARB_ERR_IRQ_ENABLE,		0xc40038fc01804070ull);
-	out_be64(p->regs + PHB_RXE_MRG_ERR_IRQ_ENABLE,		0x00006100008000a8ull);
-	out_be64(p->regs + PHB_RXE_TCE_ERR_IRQ_ENABLE,	0x60510050c0000000ull);
+		phb4_write_reg(p, PHB_TXE_ERR_IRQ_ENABLE, 0x2008400e08200000ull);
+	phb4_write_reg(p, PHB_RXE_ARB_ERR_IRQ_ENABLE, 0xc40038fc01804070ull);
+	phb4_write_reg(p, PHB_RXE_MRG_ERR_IRQ_ENABLE, 0x00006100008000a8ull);
+	phb4_write_reg(p, PHB_RXE_TCE_ERR_IRQ_ENABLE, 0x60510050c0000000ull);
 
 	/* Init_131 - Re-enable LEM error mask */
-	out_be64(p->regs + PHB_LEM_ERROR_MASK,			0x0000000000000000ull);
+	phb4_write_reg(p, PHB_LEM_ERROR_MASK, 0x0000000000000000ull);
 
 
 	/* Init_132 - Enable DMA address speculation */
-	out_be64(p->regs + PHB_TCE_SPEC_CTL,			0x0000000000000000ull);
+	phb4_write_reg(p, PHB_TCE_SPEC_CTL, 0x0000000000000000ull);
 
 	/* Init_133 - Timeout Control Register 1 */
-	out_be64(p->regs + PHB_TIMEOUT_CTRL1,			0x0015150000150000ull);
+	phb4_write_reg(p, PHB_TIMEOUT_CTRL1, 0x0015150000150000ull);
 
 	/* Init_134 - Timeout Control Register 2 */
-	out_be64(p->regs + PHB_TIMEOUT_CTRL2,			0x0000151500000000ull);
+	phb4_write_reg(p, PHB_TIMEOUT_CTRL2, 0x0000151500000000ull);
 
 	/* Init_135 - PBL Timeout Control Register */
-	out_be64(p->regs + PHB_PBL_TIMEOUT_CTRL,		0x2013000000000000ull);
+	phb4_write_reg(p, PHB_PBL_TIMEOUT_CTRL, 0x2013000000000000ull);
 
 	/* Mark the PHB as functional which enables all the various sequences */
 	p->broken = false;
@@ -5318,7 +5318,7 @@ static bool phb4_read_capabilities(struct phb4 *p)
 	PHBDBG(p, "Core revision 0x%x\n", p->rev);
 
 	/* Read EEH capabilities */
-	val = in_be64(p->regs + PHB_PHB4_EEH_CAP);
+	val = phb4_read_reg(p, PHB_PHB4_EEH_CAP);
 	if (val == 0xffffffffffffffffUL) {
 		PHBERR(p, "Failed to read EEH cap, PHB appears broken\n");
 		return false;
@@ -5334,7 +5334,7 @@ static bool phb4_read_capabilities(struct phb4 *p)
 		p->tvt_size = 512;
 	}
 
-	val = in_be64(p->regs + PHB_PHB4_IRQ_CAP);
+	val = phb4_read_reg(p, PHB_PHB4_IRQ_CAP);
 	if (val == 0xffffffffffffffffUL) {
 		PHBERR(p, "Failed to read IRQ cap, PHB appears broken\n");
 		return false;
