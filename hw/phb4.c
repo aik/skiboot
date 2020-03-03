@@ -273,7 +273,7 @@ static int64_t phb4_pcicfg_check(struct phb4 *p, uint32_t bdfn,
 }
 
 static int64_t phb4_rc_read(struct phb4 *p, uint32_t offset, uint8_t sz,
-			    void *data, bool use_asb)
+			    void *data)
 {
 	uint32_t reg = offset & ~3;
 	uint32_t oval;
@@ -300,13 +300,9 @@ static int64_t phb4_rc_read(struct phb4 *p, uint32_t offset, uint8_t sz,
 		break;
 	default:
 		oval = 0xffffffff; /* default if offset too big */
-		if (reg < PHB_RC_CONFIG_SIZE) {
-			if (use_asb)
-				oval = bswap_32(phb4_read_reg_asb(p, PHB_RC_CONFIG_BASE
-								  + reg));
-			else
-				oval = in_le32(p->regs + PHB_RC_CONFIG_BASE + reg);
-		}
+		if (reg < PHB_RC_CONFIG_SIZE)
+			oval = le32_to_cpu(phb4_read_reg_asb(p,
+					PHB_RC_CONFIG_BASE + reg) >> 32);
 	}
 
 	/* Apply any post-read fixups */
@@ -341,7 +337,7 @@ static int64_t phb4_rc_read(struct phb4 *p, uint32_t offset, uint8_t sz,
 }
 
 static int64_t phb4_rc_write(struct phb4 *p, uint32_t offset, uint8_t sz,
-			     uint32_t val, bool use_asb)
+			     uint32_t val)
 {
 	uint32_t reg = offset & ~3;
 	uint32_t old, mask, shift, oldold;
@@ -352,7 +348,7 @@ static int64_t phb4_rc_write(struct phb4 *p, uint32_t offset, uint8_t sz,
 
 	/* If size isn't 4-bytes, do a RMW cycle */
 	if (sz < 4) {
-		rc = phb4_rc_read(p, reg, 4, &old, use_asb);
+		rc = phb4_rc_read(p, reg, 4, &old);
 		if (rc != OPAL_SUCCESS)
 			return rc;
 
@@ -418,10 +414,9 @@ static int64_t phb4_rc_write(struct phb4 *p, uint32_t offset, uint8_t sz,
 	default:
 		/* Workaround PHB config space enable */
 		PHBLOGCFG(p, "000 CFG%02d Wr %02x=%08x\n", 8 * sz, reg, val);
-		if (use_asb)
-			phb4_write_reg_asb(p, PHB_RC_CONFIG_BASE + reg, val);
-		else
-			out_le32(p->regs + PHB_RC_CONFIG_BASE + reg, val);
+		phb4_write_reg_asb(p, PHB_RC_CONFIG_BASE + reg,
+				   (uint64_t)cpu_to_le32(val) << 32 |
+				   cpu_to_le32(val));
 	}
 	return OPAL_SUCCESS;
 }
@@ -433,7 +428,6 @@ static int64_t phb4_pcicfg_read(struct phb4 *p, uint32_t bdfn,
 	uint64_t addr;
 	int64_t rc;
 	uint16_t pe;
-	bool use_asb = false;
 
 	rc = phb4_pcicfg_check(p, bdfn, offset, size, &pe);
 	if (rc)
@@ -444,7 +438,6 @@ static int64_t phb4_pcicfg_read(struct phb4 *p, uint32_t bdfn,
 			return OPAL_HARDWARE;
 		if (bdfn != 0)
 			return OPAL_HARDWARE;
-		use_asb = true;
 	} else if ((p->flags & PHB4_CFG_BLOCKED) && bdfn != 0) {
 		return OPAL_HARDWARE;
 	}
@@ -457,7 +450,7 @@ static int64_t phb4_pcicfg_read(struct phb4 *p, uint32_t bdfn,
 
 	/* Handle root complex MMIO based config space */
 	if (bdfn == 0)
-		return phb4_rc_read(p, offset, size, data, use_asb);
+		return phb4_rc_read(p, offset, size, data);
 
 	addr = PHB_CA_ENABLE;
 	addr = SETFIELD(PHB_CA_BDFN, addr, bdfn);
@@ -507,7 +500,6 @@ static int64_t phb4_pcicfg_write(struct phb4 *p, uint32_t bdfn,
 	uint64_t addr;
 	int64_t rc;
 	uint16_t pe;
-	bool use_asb = false;
 
 	rc = phb4_pcicfg_check(p, bdfn, offset, size, &pe);
 	if (rc)
@@ -518,7 +510,6 @@ static int64_t phb4_pcicfg_write(struct phb4 *p, uint32_t bdfn,
 			return OPAL_HARDWARE;
 		if (bdfn != 0)
 			return OPAL_HARDWARE;
-		use_asb = true;
 	} else if ((p->flags & PHB4_CFG_BLOCKED) && bdfn != 0) {
 		return OPAL_HARDWARE;
 	}
@@ -531,7 +522,7 @@ static int64_t phb4_pcicfg_write(struct phb4 *p, uint32_t bdfn,
 
 	/* Handle root complex MMIO based config space */
 	if (bdfn == 0)
-		return phb4_rc_write(p, offset, size, data, use_asb);
+		return phb4_rc_write(p, offset, size, data);
 
 	addr = PHB_CA_ENABLE;
 	addr = SETFIELD(PHB_CA_BDFN, addr, bdfn);
