@@ -430,7 +430,7 @@ static int64_t phb4_pcicfg_read(struct phb4 *p, uint32_t bdfn,
 				uint32_t offset, uint32_t size,
 				void *data)
 {
-	uint64_t addr, val64;
+	uint64_t addr;
 	int64_t rc;
 	uint16_t pe;
 	bool use_asb = false;
@@ -463,46 +463,27 @@ static int64_t phb4_pcicfg_read(struct phb4 *p, uint32_t bdfn,
 	addr = SETFIELD(PHB_CA_BDFN, addr, bdfn);
 	addr = SETFIELD(PHB_CA_REG, addr, offset & ~3u);
 	addr = SETFIELD(PHB_CA_PE, addr, pe);
-	if (use_asb) {
-		phb4_write_reg_asb(p, PHB_CONFIG_ADDRESS, addr);
-		sync();
-		val64 = bswap_64(phb4_read_reg_asb(p, PHB_CONFIG_DATA));
-		switch(size) {
-		case 1:
-			*((uint8_t *)data) = val64 >> (8 * (offset & 3));
-			break;
-		case 2:
-			*((uint16_t *)data) = val64 >> (8 * (offset & 2));
-			break;
-		case 4:
-			*((uint32_t *)data) = val64;
-			break;
-		default:
-			return OPAL_PARAMETER;
-		}
-	} else {
-		out_be64(p->regs + PHB_CONFIG_ADDRESS, addr);
-		switch(size) {
-		case 1:
-			*((uint8_t *)data) =
-				in_8(p->regs + PHB_CONFIG_DATA + (offset & 3));
-			PHBLOGCFG(p, "%03x CFG08 Rd %02x=%02x\n",
-				  bdfn, offset, *((uint8_t *)data));
-			break;
-		case 2:
-			*((uint16_t *)data) =
-				in_le16(p->regs + PHB_CONFIG_DATA + (offset & 2));
-			PHBLOGCFG(p, "%03x CFG16 Rd %02x=%04x\n",
-				  bdfn, offset, *((uint16_t *)data));
-			break;
-		case 4:
-			*((uint32_t *)data) = in_le32(p->regs + PHB_CONFIG_DATA);
-			PHBLOGCFG(p, "%03x CFG32 Rd %02x=%08x\n",
-				  bdfn, offset, *((uint32_t *)data));
-			break;
-		default:
-			return OPAL_PARAMETER;
-		}
+	out_be64(p->regs + PHB_CONFIG_ADDRESS, addr);
+	switch(size) {
+	case 1:
+		*((uint8_t *)data) =
+			in_8(p->regs + PHB_CONFIG_DATA + (offset & 3));
+		PHBLOGCFG(p, "%03x CFG08 Rd %02x=%02x\n",
+			  bdfn, offset, *((uint8_t *)data));
+		break;
+	case 2:
+		*((uint16_t *)data) =
+			in_le16(p->regs + PHB_CONFIG_DATA + (offset & 2));
+		PHBLOGCFG(p, "%03x CFG16 Rd %02x=%04x\n",
+			  bdfn, offset, *((uint16_t *)data));
+		break;
+	case 4:
+		*((uint32_t *)data) = in_le32(p->regs + PHB_CONFIG_DATA);
+		PHBLOGCFG(p, "%03x CFG32 Rd %02x=%08x\n",
+			  bdfn, offset, *((uint32_t *)data));
+		break;
+	default:
+		return OPAL_PARAMETER;
 	}
 	return OPAL_SUCCESS;
 }
@@ -556,24 +537,19 @@ static int64_t phb4_pcicfg_write(struct phb4 *p, uint32_t bdfn,
 	addr = SETFIELD(PHB_CA_BDFN, addr, bdfn);
 	addr = SETFIELD(PHB_CA_REG, addr, offset & ~3u);
 	addr = SETFIELD(PHB_CA_PE, addr, pe);
-	if (use_asb) {
-		/* We don't support ASB config space writes */
-		return OPAL_UNSUPPORTED;
-	} else {
-		out_be64(p->regs + PHB_CONFIG_ADDRESS, addr);
-		switch(size) {
-		case 1:
-			out_8(p->regs + PHB_CONFIG_DATA + (offset & 3), data);
-			break;
-		case 2:
-			out_le16(p->regs + PHB_CONFIG_DATA + (offset & 2), data);
-			break;
-		case 4:
-			out_le32(p->regs + PHB_CONFIG_DATA, data);
-			break;
-		default:
-			return OPAL_PARAMETER;
-		}
+	out_be64(p->regs + PHB_CONFIG_ADDRESS, addr);
+	switch(size) {
+	case 1:
+		out_8(p->regs + PHB_CONFIG_DATA + (offset & 3), data);
+		break;
+	case 2:
+		out_le16(p->regs + PHB_CONFIG_DATA + (offset & 2), data);
+		break;
+	case 4:
+		out_le32(p->regs + PHB_CONFIG_DATA, data);
+		break;
+	default:
+		return OPAL_PARAMETER;
 	}
 	PHBLOGCFG(p, "%03x CFG%d Wr %02x=%08x\n", bdfn, 8 * size, offset, data);
 	return OPAL_SUCCESS;
